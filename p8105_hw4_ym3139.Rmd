@@ -2,7 +2,7 @@
 title: "p8105_hw4_ym3139"
 author: 'Yutong Mao (UNI: ym3139)'
 date: "2025-10-29"
-output: html_document
+output: github_document
 ---
 
 ```{r setup, include=FALSE}
