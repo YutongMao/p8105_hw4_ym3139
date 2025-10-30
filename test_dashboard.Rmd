@@ -1,0 +1,34 @@
+---
+title: "Smoke Test Dashboard"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    theme: cosmo
+---
+
+
+```{r}
+library(flexdashboard)
+library(tidyverse)
+```
+
+Row {data-height=120}
+-----------------------------------------------------------------------
+
+### Chart A
+
+```{r}
+valueBox("42", "The Answer")
+```
+
+Row {data-height=120}
+-----------------------------------------------------------------------
+
+### Chart B
+
+```{r}
+ggplot(mtcars, aes(wt, mpg)) + geom_point()
+```
+
+
