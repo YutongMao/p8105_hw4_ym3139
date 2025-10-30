@@ -1,0 +1,194 @@
+---
+title: "NYC Restaurant Inspections — Interactive Dashboard"
+author: "Yutong Mao (UNI: ym3139)"
+date: "`r Sys.Date()`"
+output:
+  flexdashboard::flex_dashboard:
+    self_contained: true
+    orientation: rows
+    vertical_layout: fill
+    theme: cosmo
+---
+
+```{r}
+# ---- Setup (packages & theme) ----
+
+library(tidyverse)
+library(lubridate)
+library(janitor)
+library(plotly)
+library(flexdashboard)
+library(p8105.datasets)
+
+theme_set(theme_minimal(base_size = 14))
+
+```
+
+```{r}
+# ---- Load & clean data ----
+
+# Load NYC restaurant inspection dataset from the p8105 package
+data("rest_inspec", package = "p8105.datasets")
+
+# Clean and prepare the data
+ins <- rest_inspec |>
+  clean_names() |>
+  mutate(
+    boro             = str_to_title(boro),
+    # Use ymd() because dates are in the format YYYY-MM-DD
+    inspection_date  = suppressWarnings(ymd(inspection_date)),
+    score            = suppressWarnings(as.numeric(score)),
+    grade            = str_trim(str_to_upper(grade))
+  ) |>
+  filter(
+    boro %in% c("Manhattan", "Bronx", "Brooklyn", "Queens", "Staten Island"),
+    !is.na(inspection_date)
+  )
+
+# Compute number of violations per inspection (for scatter plot)
+viol_by_visit <- ins |>
+  group_by(camis, inspection_date) |>
+  summarise(
+    violations_n = n(),
+    score = first(score),
+    boro  = first(boro),
+    .groups = "drop"
+  )
+
+# ---- Sampling for faster knitting ----
+# Note: use constant n to avoid "n must be a constant" error
+set.seed(3139)
+
+ins_s <- ins |> drop_na(score)
+if (nrow(ins_s) > 50000) ins_s <- ins_s |> slice_sample(n = 50000)
+
+viol_s <- viol_by_visit |> drop_na(score)
+if (nrow(viol_s) > 20000) viol_s <- viol_s |> slice_sample(n = 20000)
+
+# ---- KPI summary statistics ----
+n_restaurants <- ins |> distinct(camis) |> nrow()
+n_inspections <- nrow(ins)
+med_score     <- ins |> summarise(m = median(score, na.rm = TRUE)) |> pull(m)
+
+```
+
+Row {data-height=120}
+-----------------------------------------------------------------------
+
+### Unique Restaurants
+```{r}
+valueBox(scales::comma(n_restaurants), "Unique Restaurants")
+```
+
+###Total Inspections
+```{r}
+valueBox(scales::comma(n_inspections), "Total Inspections")
+```
+
+###Median Score (lower is better)
+```{r}
+valueBox(round(med_score, 1), "Median Score (lower is better)")
+```
+Row-----------------------------------------------------------------------
+
+###Grade composition by borough (stacked % bar)
+```{r}
+# Collapse rare grade labels
+
+grade_boro <- ins_s |>
+filter(!is.na(grade)) |>
+mutate(grade = forcats::fct_lump(grade, n = 6, other_level = "Other"))
+
+p_bar <- ggplot(grade_boro, aes(x = boro, fill = grade)) +
+geom_bar(position = "fill") +
+scale_y_continuous(labels = scales::percent) +
+labs(x = NULL, y = "Proportion", fill = "Grade",
+title = "Grade Composition by Borough")
+
+ggplotly(p_bar)
+```
+
+Row-----------------------------------------------------------------------
+
+###Score by cuisine (top 12, horizontal boxplots)
+```{r}
+# Identify top cuisines & order by median score (lower is better)
+
+top_cuis <- ins_s |>
+count(cuisine_description, sort = TRUE) |>
+slice_head(n = 12) |>
+pull(cuisine_description)
+
+cuisine_order <- ins_s |>
+filter(cuisine_description %in% top_cuis) |>
+group_by(cuisine_description) |>
+summarise(med = median(score, na.rm = TRUE), .groups = "drop") |>
+arrange(med) |>
+pull(cuisine_description)
+
+box_dat <- ins_s |>
+filter(cuisine_description %in% top_cuis) |>
+mutate(cuisine = factor(cuisine_description, levels = cuisine_order)) |>
+select(cuisine, score) |>
+drop_na(score) |>
+ungroup()
+
+# Pure plotly avoids ggplotly/boxplot merge quirks
+
+plot_ly(
+data = box_dat,
+y = ~cuisine, x = ~score,
+type = "box", boxpoints = "outliers", orientation = "h"
+) |>
+layout(
+title = "Inspection Score by Cuisine (Top 12)",
+xaxis = list(title = "Inspection score (lower is better)"),
+yaxis = list(title = "")
+)
+```
+###Score vs violations per visit (scatter)
+```{r}
+p_scatter <- ggplot(viol_s, aes(x = violations_n, y = score, color = boro)) +
+geom_jitter(width = 0.3, alpha = 0.5) +
+labs(x = "Violations per inspection",
+y = "Inspection score (lower is better)",
+title = "Score vs Number of Violations per Visit")
+
+ggplotly(p_scatter)
+```
+
+```{r}
+p_scatter <- ggplot(viol_s, aes(x = violations_n, y = score, color = boro)) +
+geom_jitter(width = 0.3, alpha = 0.5) +
+labs(x = "Violations per inspection",
+y = "Inspection score (lower is better)",
+title = "Score vs Number of Violations per Visit")
+
+ggplotly(p_scatter)
+```
+Row-----------------------------------------------------------------------
+
+###Monthly average score by borough (line)
+```{r}
+# Monthly average score by borough (line) — plotly native
+
+monthly <- ins_s |>
+mutate(month = as.Date(floor_date(inspection_date, "month"))) |>
+group_by(boro, month) |>
+summarise(avg_score = mean(score, na.rm = TRUE), .groups = "drop") |>
+arrange(boro, month) |>
+drop_na(month, avg_score)
+
+plot_ly(
+data = monthly,
+x = ~month, y = ~avg_score, color = ~boro,
+type = "scatter", mode = "lines"
+) |>
+layout(
+title = "Monthly Average Inspection Score by Borough",
+xaxis = list(title = ""),
+yaxis = list(title = "Avg score per month")
+)
+
+```
+
